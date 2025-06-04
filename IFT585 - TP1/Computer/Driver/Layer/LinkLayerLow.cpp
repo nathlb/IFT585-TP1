@@ -77,11 +77,29 @@ CRCDataEncoderDecoder::~CRCDataEncoderDecoder()
 
 DynamicDataBuffer CRCDataEncoderDecoder::encode(const DynamicDataBuffer& data) const
 {
-    return data;
+    uint8_t crc_start_byte = 0xEA; // CRC-8
+	uint8_t crc_end_byte = 0x01; // CRC-8
+
+    int newSize = data.size() + 2;
+	DynamicDataBuffer dataWithCRC(newSize);
+
+	dataWithCRC.write(crc_start_byte); // Start byte for CRC
+	dataWithCRC.write(data, 1);
+	dataWithCRC.write(crc_end_byte, data.size() + 1); // End byte for CRC
+
+    return dataWithCRC;
 }
 
 std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDataBuffer& data) const
 {
+	auto crc_start_byte = data.read<uint8_t>(0);
+	DynamicDataBuffer non_const_data(data);
+	uint8_t* dataWithoutStartCRC = new uint8_t[non_const_data.size() - 1];
+	non_const_data.readTo(dataWithoutStartCRC, 1, non_const_data.size() - 1);
+
+	// TODO: Diviser datawithoutStartCRC par crc_start_byte pour verifier la validite des donnees et retourner vrai ou faux + dataWithoutStartCRC sans le dernier byte
+
+
     return std::pair<bool, DynamicDataBuffer>(true, data);
 }
 
