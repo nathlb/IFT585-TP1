@@ -78,7 +78,7 @@ CRCDataEncoderDecoder::~CRCDataEncoderDecoder()
 DynamicDataBuffer CRCDataEncoderDecoder::encode(const DynamicDataBuffer& data) const
 {
     uint8_t crc_start_byte = 0xEA; // CRC-8
-	uint8_t crc_end_byte = 0x01; // CRC-8
+	uint8_t crc_end_byte = 0x00; // CRC-8
 
     int newSize = data.size() + 2;
 	DynamicDataBuffer dataWithCRC(newSize);
