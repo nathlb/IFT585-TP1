@@ -117,4 +117,13 @@
   <ItemGroup>
     <Natvis Include="IFT585.natvis" />
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="globalConfig.txt" />
+    <Text Include="Computer1.txt" />
+    <Text Include="Computer2.txt" />
+    <Text Include="Computer2Files.txt" />
+    <Text Include="Computer1Files.txt" />
+    <Text Include="yo.txt" />
+    <Text Include="hey.txt" />
+  </ItemGroup>
 </Project>

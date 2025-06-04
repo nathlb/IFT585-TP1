@@ -1,0 +1,9 @@
+LinkLayerLowReceivingBufferSize=600000
+LinkLayerLowSendingBufferSize=600000
+LinkLayerLowDataEncoderDecoder=0
+MacAddressByte1=0x00
+MacAddressByte2=0x1A
+MacAddressByte3=0x2B
+MacAddressByte4=0x3C
+MacAddressByte5=0x4D
+MacAddressByte6=0x5E
