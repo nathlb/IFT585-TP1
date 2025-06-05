@@ -1,12 +1,13 @@
 #include "LinkLayerLow.h"
 
+#include <iomanip>
+
 #include "LinkLayer.h"
 #include "../NetworkDriver.h"
 #include "../../../DataStructures/DataBuffer.h"
 #include "../../../General/Configuration.h"
 #include "../../../General/Logger.h"
 
-#include <iostream>
 
 std::unique_ptr<DataEncoderDecoder> DataEncoderDecoder::CreateEncoderDecoder(const Configuration& config)
 {
@@ -75,32 +76,58 @@ CRCDataEncoderDecoder::~CRCDataEncoderDecoder()
 {
 }
 
+uint8_t compute_crc8(const uint8_t* data, size_t length, uint8_t crc_generator = 0xEA)
+{
+	uint8_t crc = 0;
+    for (size_t i = 0; i < length; i++)
+    {
+		crc ^= data[i];
+		for (int j = 0; j < 8; j++)
+		{
+			if (crc & 0x80)
+			{
+				crc = (crc << 1) ^ crc_generator;
+			}
+			else
+			{
+				crc <<= 1;
+			}
+		}
+    }
+	return crc;
+}
+
+
 DynamicDataBuffer CRCDataEncoderDecoder::encode(const DynamicDataBuffer& data) const
 {
-    uint8_t crc_start_byte = 0xEA; // CRC-8
-	uint8_t crc_end_byte = 0x00; // CRC-8
+	DynamicDataBuffer non_const_data = DynamicDataBuffer(data); // Créer un DynamicDataBuffer non const pour pouvoir lire les octets
+	uint8_t* dataWithCRC = new uint8_t[data.size() + 1]; // Allouer un tableau de taille data.size() pour les données + crc
 
-    int newSize = data.size() + 2;
-	DynamicDataBuffer dataWithCRC(newSize);
+	non_const_data.readTo(dataWithCRC, 0, data.size()); // Copier les octets de data dans dataWithCRC
 
-	dataWithCRC.write(crc_start_byte); // Start byte for CRC
-	dataWithCRC.write(data, 1);
-	dataWithCRC.write(crc_end_byte, data.size() + 1); // End byte for CRC
+	uint8_t crc = compute_crc8(dataWithCRC, data.size()); // Calculer le CRC sur les données + l'octet de CRC
 
-    return dataWithCRC;
+	dataWithCRC[data.size()] = crc; // Mettre le CRC à la fin des données
+	DynamicDataBuffer dataWithCRCBuffer(data.size() + 1, dataWithCRC); // Créer un DynamicDataBuffer avec les données et le CRC
+	delete[] dataWithCRC; // Libérer la mémoire allouée pour dataWithCRC
+
+    return dataWithCRCBuffer;
 }
 
 std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDataBuffer& data) const
 {
-	auto crc_start_byte = data.read<uint8_t>(0);
-	DynamicDataBuffer non_const_data(data);
-	uint8_t* dataWithoutStartCRC = new uint8_t[non_const_data.size() - 1];
-	non_const_data.readTo(dataWithoutStartCRC, 1, non_const_data.size() - 1);
+	DynamicDataBuffer non_const_data = DynamicDataBuffer(data); // Créer un DynamicDataBuffer non const pour pouvoir lire les octets
+	uint8_t* dataReceived = new uint8_t[data.size()]; // Allouer un tableau de taille data.size() pour les données reçues
 
-	// TODO: Diviser datawithoutStartCRC par crc_start_byte pour verifier la validite des donnees et retourner vrai ou faux + dataWithoutStartCRC sans le dernier byte
+	non_const_data.readTo(dataReceived, 0, data.size()); // Copier les octets de data dans dataReceived
+	DynamicDataBuffer dataWithoutCRCBuffer = DynamicDataBuffer(data.size() - 1, dataReceived); // Créer un DynamicDataBuffer avec les données reçues sans le CRC
+
+	uint8_t computedCRC = compute_crc8(dataReceived, data.size()); // Calculer le CRC sur les données
+	bool isValid = (computedCRC == 0); // Vérifier si les données sont valides (CRC doit être 0)
+	delete[] dataReceived; // Libérer la mémoire allouée pour dataReceived
 
 
-    return std::pair<bool, DynamicDataBuffer>(true, data);
+    return std::pair<bool, DynamicDataBuffer>(isValid, dataWithoutCRCBuffer);
 }
 
 
