@@ -101,19 +101,19 @@ bool LinkLayer::sendFrame(const Frame& frame)
         if (canSendData(frame))
         {
             // Vous pouvez décommenter ce code pour avoir plus de détails dans la console lors de l'exécution
-            //Logger log(std::cout);
-            //if (frame.Size == FrameType::NAK)
-            //{
-            //    log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
-            //}
-            //else if (frame.Size == FrameType::ACK)
-            //{
-            //    log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
-            //}
-            //else
-            //{
-            //    log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
-            //}
+            Logger log(std::cout);
+            if (frame.Size == FrameType::NAK)
+            {
+                log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+            }
+            else if (frame.Size == FrameType::ACK)
+            {
+                log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+            }
+            else
+            {
+                log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
+            }
             m_sendingQueue.push(frame);
             return true;
         }
@@ -298,27 +298,60 @@ void LinkLayer::senderCallback()
     // À faire TP
     // Remplacer le code suivant qui ne fait qu'envoyer les trames dans l'ordre reçu sans validation
     // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
-    
+
     // Passtrough
     NumberSequence nextID = 0;
+    NumberSequence m_currentSequence = 0;
+    std::map<NumberSequence, Frame> m_FramesSent;
+    std::map<NumberSequence, Frame> m_EventFrameAssociation;
     while (m_executeSending)
     {
-        // Est-ce qu'on doit envoyer des donnees
-        if (m_driver->getNetworkLayer().dataReady())
+        while (!m_sendingEventQueue.empty())
+        {
+            Event ev = getNextSendingEvent();
+            switch (ev.Type)
+            {
+                case EventType::SEND_ACK_REQUEST:
+                {
+
+                }
+                case EventType::SEND_NAK_REQUEST:
+                {
+
+                }
+                case EventType::STOP_ACK_TIMER_REQUEST:
+                {
+                    notifyStopAckTimers(ev.Address);
+                }
+                case EventType::SEND_TIMEOUT:
+                {
+                    if (!sendFrame(m_EventFrameAssociation[ev.Number]))
+                        return;
+                }
+                default:
+                {
+                    break;
+                } 
+            }
+        }
+
+        if (m_driver->getNetworkLayer().dataReady() && m_currentSequence <= m_maximumSequence)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
             Frame frame;
             frame.Destination = arp(packet);
             frame.Source = m_address;
-            frame.NumberSeq = nextID++;
+            frame.NumberSeq = nextID;
+            frame.Ack = nextID;
             frame.Data = Buffering::pack<Packet>(packet);
             frame.Size = (uint16_t)frame.Data.size();
+            m_FramesSent[nextID] = frame;
+            m_EventFrameAssociation[startTimeoutTimer(nextID)] = frame;
+            nextID++;
 
-            // On envoit la trame. Si la trame n'est pas envoye, c'est qu'on veut arreter le simulateur
             if (!sendFrame(frame))
-            {
                 return;
-            }
+
         }
     }
 }
@@ -329,10 +362,31 @@ void LinkLayer::receiverCallback()
     // À faire TP
     // Remplacer le code suivant qui ne fait que recevoir les trames dans l'ordre reçu sans validation
     // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
-    
+
     // Passtrough
     while (m_executeReceiving)
-    {        
+    {
+
+        while (!m_sendingEventQueue.empty())
+        {
+            Event ev = getNextSendingEvent();
+            switch (ev.Type)
+            {
+                case EventType::ACK_RECEIVED:
+                {
+                   //notifyACK();
+                }
+                case EventType::NAK_RECEIVED:
+                {
+                    //notifyNAK();
+                }
+                default:
+                {
+                    break;
+                }
+            }
+        }
+
         if (m_receivingQueue.canRead<Frame>())
         {
             Frame frame = m_receivingQueue.pop<Frame>();
