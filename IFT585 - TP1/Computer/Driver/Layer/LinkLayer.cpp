@@ -7,6 +7,7 @@
 #include <iostream>
 #include <functional>
 #include <map>
+#include <set>
 
 
 LinkLayer::LinkLayer(NetworkDriver* driver, const Configuration& config)
@@ -313,21 +314,54 @@ void LinkLayer::senderCallback()
             {
                 case EventType::SEND_ACK_REQUEST:
                 {
-
+                    Frame ackFrame;
+                    ackFrame.Source = m_address;
+                    ackFrame.Destination = ev.Address;
+                    ackFrame.NumberSeq = 0;         
+                    ackFrame.Ack = ev.Number;      
+                    ackFrame.Size = FrameType::ACK; 
+                    sendFrame(ackFrame);
+                    break;
                 }
                 case EventType::SEND_NAK_REQUEST:
                 {
-
+                    Frame nakFrame;
+                    nakFrame.Source = m_address;
+                    nakFrame.Destination = ev.Address;
+                    nakFrame.NumberSeq = 0;         
+                    nakFrame.Ack = ev.Number;       
+                    nakFrame.Size = FrameType::NAK;
+                    sendFrame(nakFrame);
+                    break;
                 }
-                case EventType::STOP_ACK_TIMER_REQUEST:
+                case EventType::NAK_RECEIVED:
                 {
-                    notifyStopAckTimers(ev.Address);
+                    if (m_FramesSent.find(ev.Number) != m_FramesSent.end())
+                    {
+                        Frame frame = m_FramesSent[ev.Number];
+                        m_EventFrameAssociation[startTimeoutTimer(ev.Number)] = frame;
+                        sendFrame(frame);
+                    }
+                    break;
                 }
+				case EventType::ACK_RECEIVED:
+				{
+                    m_FramesSent.erase(ev.Number);
+					m_EventFrameAssociation.erase(ev.Number);
+                    break;
+				}
                 case EventType::SEND_TIMEOUT:
                 {
-                    if (!sendFrame(m_EventFrameAssociation[ev.Number]))
-                        return;
+                    if (m_FramesSent.find(ev.Number) != m_FramesSent.end())
+                    {
+                        Frame frame = m_FramesSent[ev.Number];
+                        m_EventFrameAssociation[startTimeoutTimer(ev.Number)] = frame;
+                        if (!sendFrame(frame))
+                            return;
+                    }
+                    break;
                 }
+
                 default:
                 {
                     break;
@@ -342,15 +376,17 @@ void LinkLayer::senderCallback()
             frame.Destination = arp(packet);
             frame.Source = m_address;
             frame.NumberSeq = nextID;
-            frame.Ack = nextID;
+            frame.Ack = 0;
             frame.Data = Buffering::pack<Packet>(packet);
             frame.Size = (uint16_t)frame.Data.size();
             m_FramesSent[nextID] = frame;
             m_EventFrameAssociation[startTimeoutTimer(nextID)] = frame;
-            nextID++;
+            
 
             if (!sendFrame(frame))
                 return;
+
+            nextID++;
 
         }
     }
@@ -364,6 +400,10 @@ void LinkLayer::receiverCallback()
     // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
 
     // Passtrough
+    std::set<NumberSequence> receivedSeq;
+    std::map<NumberSequence, Frame> m_BufferedFrames;
+    NumberSequence expected = 0;
+
     while (m_executeReceiving)
     {
 
@@ -372,13 +412,15 @@ void LinkLayer::receiverCallback()
             Event ev = getNextSendingEvent();
             switch (ev.Type)
             {
-                case EventType::ACK_RECEIVED:
+                case EventType::STOP_ACK_TIMER_REQUEST:
                 {
-                   //notifyACK();
+					stopAckTimer(ev.TimerID);
+                    break;
                 }
-                case EventType::NAK_RECEIVED:
+                case EventType::ACK_TIMEOUT:
                 {
-                    //notifyNAK();
+                    sendAck(m_address, expected);
+                    break;
                 }
                 default:
                 {
@@ -390,7 +432,49 @@ void LinkLayer::receiverCallback()
         if (m_receivingQueue.canRead<Frame>())
         {
             Frame frame = m_receivingQueue.pop<Frame>();
-            m_driver->getNetworkLayer().receiveData(Buffering::unpack<Packet>(frame.Data));
+
+            if (frame.Size == FrameType::ACK)
+            {
+                notifyACK(frame, frame.Ack);
+                continue;
+            }
+            else if (frame.Size == FrameType::NAK)
+            {
+                notifyNAK(frame);
+                continue;
+            }
+
+            if (frame.NumberSeq == expected)
+            {
+                Packet p = Buffering::unpack<Packet>(frame.Data);
+                m_driver->getNetworkLayer().receiveData(p);
+                expected++;
+
+                while (m_BufferedFrames.count(expected))
+                {
+                    Frame buffered = m_BufferedFrames[expected];
+                    m_BufferedFrames.erase(expected);
+                    Packet p2 = Buffering::unpack<Packet>(buffered.Data);
+                    m_driver->getNetworkLayer().receiveData(p2);
+                    expected++;
+                }
+
+                sendAck(frame.Source, expected);
+            }
+            else if (expected < frame.NumberSeq && frame.NumberSeq < expected + m_maximumSequence)
+            {
+                m_BufferedFrames[frame.NumberSeq] = frame;
+                sendAck(frame.Source, expected); 
+            }
+            else
+            {
+                sendNak(frame.Source, expected);
+            }
+
+            if (frame.Ack != 0)
+            {
+                notifyACK(frame, frame.Ack);
+            }
         }
     }
 }
