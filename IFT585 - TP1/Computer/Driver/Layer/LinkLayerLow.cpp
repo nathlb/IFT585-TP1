@@ -132,6 +132,13 @@ DynamicDataBuffer CRCDataEncoderDecoder::encode(const DynamicDataBuffer& data) c
 
 std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDataBuffer& data) const
 {
+	Logger logger(std::cout);
+
+    if (data.size() < 4)
+    {
+		logger << "Decodage : Donnees trop courtes pour contenir un CRC." << std::endl;
+		return std::pair<bool, DynamicDataBuffer>(false, DynamicDataBuffer());
+    }
 	DynamicDataBuffer non_const_data = DynamicDataBuffer(data); // Créer un DynamicDataBuffer non const pour pouvoir lire les octets
 	uint8_t* dataReceived = new uint8_t[data.size()]; // Allouer un tableau de taille data.size() pour les données reçues
 
@@ -142,7 +149,6 @@ std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDa
 	bool isValid = (computedCRC == 0); // Vérifier si les données sont valides (CRC doit être 0)
 	delete[] dataReceived; // Libérer la mémoire allouée pour dataReceived
 
-	Logger logger(std::cout);
 	logger << "Decodage : Taille des donnees = " << data.size() << ", CRC = "
 		<< std::hex << std::setfill('0') << std::setw(8) << computedCRC << std::dec << std::endl;
 	if (isValid)

@@ -38,7 +38,7 @@ const MACAddress& LinkLayer::getMACAddress() const
 // Demarre les fils d'execution pour l'envoi et la reception des trames
 void LinkLayer::start()
 {
-    stop();
+    //stop();
 
     m_timers->start();
 
@@ -101,19 +101,19 @@ bool LinkLayer::sendFrame(const Frame& frame)
         if (canSendData(frame))
         {
             // Vous pouvez décommenter ce code pour avoir plus de détails dans la console lors de l'exécution
-            //Logger log(std::cout);
-            //if (frame.Size == FrameType::NAK)
-            //{
-            //    log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
-            //}
-            //else if (frame.Size == FrameType::ACK)
-            //{
-            //    log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
-            //}
-            //else
-            //{
-            //    log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
-            //}
+            Logger log(std::cout);
+            if (frame.Size == FrameType::NAK)
+            {
+                log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+            }
+            else if (frame.Size == FrameType::ACK)
+            {
+                log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+            }
+            else
+            {
+                log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
+            }
             m_sendingQueue.push(frame);
             return true;
         }
@@ -295,7 +295,7 @@ MACAddress LinkLayer::arp(const Packet& packet) const
 // Fonction qui fait l'envoi des trames et qui gere la fenetre d'envoi
 void LinkLayer::senderCallback()
 {
-    // À faire TP
+    // todo TP
     // Remplacer le code suivant qui ne fait qu'envoyer les trames dans l'ordre reçu sans validation
     // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
     
@@ -326,7 +326,7 @@ void LinkLayer::senderCallback()
 // Fonction qui s'occupe de la reception des trames
 void LinkLayer::receiverCallback()
 {
-    // À faire TP
+    // todo TP
     // Remplacer le code suivant qui ne fait que recevoir les trames dans l'ordre reçu sans validation
     // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
     
