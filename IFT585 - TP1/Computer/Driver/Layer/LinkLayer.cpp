@@ -7,6 +7,7 @@
 #include <iostream>
 #include <functional>
 #include <map>
+#include <set>
 
 
 LinkLayer::LinkLayer(NetworkDriver* driver, const Configuration& config)
@@ -295,48 +296,197 @@ MACAddress LinkLayer::arp(const Packet& packet) const
 // Fonction qui fait l'envoi des trames et qui gere la fenetre d'envoi
 void LinkLayer::senderCallback()
 {
-    // todo TP
-    // Remplacer le code suivant qui ne fait qu'envoyer les trames dans l'ordre reçu sans validation
-    // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
-    
-    // Passtrough
-    NumberSequence nextID = 0;
+    // Selective Repeat Sender Window
+    const NumberSequence window_size = m_maximumBufferedFrameCount;
+    const NumberSequence max_seq = m_maximumSequence;
+    NumberSequence send_base = 0;
+    NumberSequence next_seq_num = 0;
+
+    std::map<NumberSequence, Frame> sent_frames; // sequence number -> frame
+    std::map<NumberSequence, size_t> frame_timers; // sequence number -> timer id
+
     while (m_executeSending)
     {
-        // Est-ce qu'on doit envoyer des donnees
-        if (m_driver->getNetworkLayer().dataReady())
+        // Handle events (ACK, NAK, TIMEOUT)
+        while (!m_sendingEventQueue.empty())
+        {
+            Event ev = getNextSendingEvent();
+            switch (ev.Type)
+            {
+                case EventType::SEND_ACK_REQUEST:
+                {
+                    Frame ackFrame;
+                    ackFrame.Source = m_address;
+                    ackFrame.Destination = ev.Address;
+                    ackFrame.NumberSeq = 0;
+                    ackFrame.Ack = ev.Number;
+                    ackFrame.Size = FrameType::ACK;
+                    sendFrame(ackFrame);
+                    break;
+                }
+                case EventType::SEND_NAK_REQUEST:
+                {
+                    Frame nakFrame;
+                    nakFrame.Source = m_address;
+                    nakFrame.Destination = ev.Address;
+                    nakFrame.NumberSeq = 0;
+                    nakFrame.Ack = ev.Number;
+                    nakFrame.Size = FrameType::NAK;
+                    sendFrame(nakFrame);
+                    break;
+                }
+                case EventType::NAK_RECEIVED:
+                case EventType::SEND_TIMEOUT:
+                {
+                    // Retransmit only the requested frame
+                    auto it = sent_frames.find(ev.Number);
+                    if (it != sent_frames.end())
+                    {
+                        // Restart timer
+                        if (frame_timers.count(ev.Number))
+                            stopAckTimer(frame_timers[ev.Number]);
+                        frame_timers[ev.Number] = startTimeoutTimer(ev.Number);
+                        sendFrame(it->second);
+                    }
+                    break;
+                }
+                case EventType::ACK_RECEIVED:
+                {
+                    // Slide window if possible
+                    NumberSequence ack = ev.Number;
+                    if (sent_frames.count(ack))
+                    {
+                        sent_frames.erase(ack);
+                        if (frame_timers.count(ack))
+                        {
+                            stopAckTimer(frame_timers[ack]);
+                            frame_timers.erase(ack);
+                        }
+                        // Slide send_base forward if possible
+                        while (!sent_frames.empty() && !sent_frames.count(send_base))
+                        {
+                            send_base = (send_base + 1) % (max_seq + 1);
+                        }
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        // Send new frames if window is not full
+        while (m_driver->getNetworkLayer().dataReady() &&
+               ((next_seq_num - send_base + max_seq + 1) % (max_seq + 1)) < window_size)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
             Frame frame;
             frame.Destination = arp(packet);
             frame.Source = m_address;
-            frame.NumberSeq = nextID++;
+            frame.NumberSeq = next_seq_num;
+            frame.Ack = 0;
             frame.Data = Buffering::pack<Packet>(packet);
             frame.Size = (uint16_t)frame.Data.size();
 
-            // On envoit la trame. Si la trame n'est pas envoye, c'est qu'on veut arreter le simulateur
+            sent_frames[next_seq_num] = frame;
+            frame_timers[next_seq_num] = startTimeoutTimer(next_seq_num);
+
             if (!sendFrame(frame))
-            {
                 return;
+
+            next_seq_num = (next_seq_num + 1) % (max_seq + 1);
+        }
+    }
+}
+
+void LinkLayer::receiverCallback()
+{
+    // Selective Repeat Receiver Window
+    const NumberSequence window_size = m_maximumBufferedFrameCount;
+    const NumberSequence max_seq = m_maximumSequence;
+    NumberSequence recv_base = 0;
+    std::map<NumberSequence, Frame> buffered_frames; // sequence number -> frame
+    std::set<NumberSequence> received_seq; // for duplicate detection
+
+    while (m_executeReceiving)
+    {
+        // Handle events (ACK timeout, STOP ACK timer)
+        while (!m_receivingEventQueue.empty())
+        {
+            Event ev = getNextReceivingEvent();
+            switch (ev.Type)
+            {
+                case EventType::STOP_ACK_TIMER_REQUEST:
+                {
+                    stopAckTimer(ev.TimerID);
+                    break;
+                }
+                case EventType::ACK_TIMEOUT:
+                {
+                    sendAck(m_address, recv_base);
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        if (m_receivingQueue.canRead<Frame>())
+        {
+            Frame frame = m_receivingQueue.pop<Frame>();
+
+            if (frame.Size == FrameType::ACK)
+            {
+                notifyACK(frame, frame.Ack);
+                continue;
+            }
+            else if (frame.Size == FrameType::NAK)
+            {
+                notifyNAK(frame);
+                continue;
+            }
+
+            NumberSequence seq = frame.NumberSeq;
+            // Check if seq is within receiver window
+            bool in_window = ((seq - recv_base + max_seq + 1) % (max_seq + 1)) < window_size;
+
+            if (in_window)
+            {
+                // If not already received, buffer and send ACK
+                if (received_seq.find(seq) == received_seq.end())
+                {
+                    buffered_frames[seq] = frame;
+                    received_seq.insert(seq);
+                    sendAck(frame.Source, seq);
+                }
+                else
+                {
+                    // Duplicate, re-ACK
+                    sendAck(frame.Source, seq);
+                }
+
+                // Deliver in-order frames to upper layer
+                while (received_seq.find(recv_base) != received_seq.end())
+                {
+                    Packet p = Buffering::unpack<Packet>(buffered_frames[recv_base].Data);
+                    m_driver->getNetworkLayer().receiveData(p);
+                    buffered_frames.erase(recv_base);
+                    received_seq.erase(recv_base);
+                    recv_base = (recv_base + 1) % (max_seq + 1);
+                }
+            }
+            else
+            {
+                // Out of window, send NAK for expected
+                sendNak(frame.Source, recv_base);
+            }
+
+            // Piggybacked ACK
+            if (frame.Ack != 0)
+            {
+                notifyACK(frame, frame.Ack);
             }
         }
     }
 }
 
-// Fonction qui s'occupe de la reception des trames
-void LinkLayer::receiverCallback()
-{
-    // todo TP
-    // Remplacer le code suivant qui ne fait que recevoir les trames dans l'ordre reçu sans validation
-    // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
-    
-    // Passtrough
-    while (m_executeReceiving)
-    {        
-        if (m_receivingQueue.canRead<Frame>())
-        {
-            Frame frame = m_receivingQueue.pop<Frame>();
-            m_driver->getNetworkLayer().receiveData(Buffering::unpack<Packet>(frame.Data));
-        }
-    }
-}
