@@ -23,6 +23,9 @@ LinkLayer::LinkLayer(NetworkDriver* driver, const Configuration& config)
     m_maximumSequence = m_maximumBufferedFrameCount * 2 - 1;
     m_ackTimeout = m_transmissionTimeout / 4;
     m_timers = std::make_unique<Timer>();
+    Logger log(std::cout);
+    log << "Max seq: " << m_maximumSequence << std::endl;
+    log << "Max outstanding: " << m_maximumBufferedFrameCount << std::endl;
 }
 
 LinkLayer::~LinkLayer()
@@ -102,19 +105,19 @@ bool LinkLayer::sendFrame(const Frame& frame)
         if (canSendData(frame))
         {
             // Vous pouvez décommenter ce code pour avoir plus de détails dans la console lors de l'exécution
-            Logger log(std::cout);
-            if (frame.Size == FrameType::NAK)
-            {
-                log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
-            }
-            else if (frame.Size == FrameType::ACK)
-            {
-                log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
-            }
-            else
-            {
-                log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
-            }
+            //Logger log(std::cout);
+            //if (frame.Size == FrameType::NAK)
+            //{
+            //    log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+            //}
+            //else if (frame.Size == FrameType::ACK)
+            //{
+            //    log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+            //}
+            //else
+            //{
+            //    log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
+            //}
             m_sendingQueue.push(frame);
             return true;
         }
@@ -296,14 +299,16 @@ MACAddress LinkLayer::arp(const Packet& packet) const
 // Fonction qui fait l'envoi des trames et qui gere la fenetre d'envoi
 void LinkLayer::senderCallback()
 {
-    // Selective Repeat Sender Window
     const NumberSequence window_size = m_maximumBufferedFrameCount;
     const NumberSequence max_seq = m_maximumSequence;
     NumberSequence send_base = 0;
-    NumberSequence next_seq_num = 0;
+    NumberSequence next_seq = 0;
 
-    std::map<NumberSequence, Frame> sent_frames; // sequence number -> frame
-    std::map<NumberSequence, size_t> frame_timers; // sequence number -> timer id
+    std::map<NumberSequence, Frame> out_buf;
+    std::map<NumberSequence, size_t> frame_timers;
+    std::set<NumberSequence> acked;
+
+    Logger log(std::cout);
 
     while (m_executeSending)
     {
@@ -314,16 +319,8 @@ void LinkLayer::senderCallback()
             switch (ev.Type)
             {
                 case EventType::SEND_ACK_REQUEST:
-                {
-                    Frame ackFrame;
-                    ackFrame.Source = m_address;
-                    ackFrame.Destination = ev.Address;
-                    ackFrame.NumberSeq = 0;
-                    ackFrame.Ack = ev.Number;
-                    ackFrame.Size = FrameType::ACK;
-                    sendFrame(ackFrame);
+                    // Standalone ACKs are sent by receiver, not here
                     break;
-                }
                 case EventType::SEND_NAK_REQUEST:
                 {
                     Frame nakFrame;
@@ -336,37 +333,48 @@ void LinkLayer::senderCallback()
                     break;
                 }
                 case EventType::NAK_RECEIVED:
+                {
+                    NumberSequence seq = (ev.Number + 1) % (max_seq + 1);
+                    if (out_buf.count(seq))
+                    {
+                        if (frame_timers.count(seq))
+                            stopAckTimer(frame_timers[seq]);
+                        frame_timers[seq] = startTimeoutTimer(seq);
+                        sendFrame(out_buf[seq]);
+                    }
+                    break;
+                }
                 case EventType::SEND_TIMEOUT:
                 {
-                    // Retransmit only the requested frame
-                    auto it = sent_frames.find(ev.Number);
-                    if (it != sent_frames.end())
+                    NumberSequence seq = ev.Number;
+                    if (out_buf.count(seq))
                     {
-                        // Restart timer
-                        if (frame_timers.count(ev.Number))
-                            stopAckTimer(frame_timers[ev.Number]);
-                        frame_timers[ev.Number] = startTimeoutTimer(ev.Number);
-                        sendFrame(it->second);
+                        if (frame_timers.count(seq))
+                            stopAckTimer(frame_timers[seq]);
+                        frame_timers[seq] = startTimeoutTimer(seq);
+                        sendFrame(out_buf[seq]);
                     }
                     break;
                 }
                 case EventType::ACK_RECEIVED:
                 {
-                    // Slide window if possible
                     NumberSequence ack = ev.Number;
-                    if (sent_frames.count(ack))
+                    // Mark this frame as acknowledged
+                    if (out_buf.count(ack))
                     {
-                        sent_frames.erase(ack);
+                        acked.insert(ack);
                         if (frame_timers.count(ack))
                         {
                             stopAckTimer(frame_timers[ack]);
                             frame_timers.erase(ack);
                         }
-                        // Slide send_base forward if possible
-                        while (!sent_frames.empty() && !sent_frames.count(send_base))
-                        {
-                            send_base = (send_base + 1) % (max_seq + 1);
-                        }
+                        out_buf.erase(ack);
+                    }
+                    // Slide send_base forward for all consecutive acked frames
+                    while (!out_buf.count(send_base) && send_base != next_seq)
+                    {
+                        send_base = (send_base + 1) % (max_seq + 1);
+                        log << "New sender's lower edge: " << send_base << std::endl;
                     }
                     break;
                 }
@@ -375,55 +383,59 @@ void LinkLayer::senderCallback()
             }
         }
 
-        // Send new frames if window is not full
+        // Only send if window is not full
         while (m_driver->getNetworkLayer().dataReady() &&
-               ((next_seq_num - send_base + max_seq + 1) % (max_seq + 1)) < window_size)
+               ((next_seq - send_base + max_seq + 1) % (max_seq + 1)) < window_size)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
             Frame frame;
             frame.Destination = arp(packet);
             frame.Source = m_address;
-            frame.NumberSeq = next_seq_num;
+            frame.NumberSeq = next_seq;
             frame.Data = Buffering::pack<Packet>(packet);
             frame.Size = (uint16_t)frame.Data.size();
 
-            // Piggyback
-            std::unique_lock<std::mutex> lock(m_ackMutex);
-            if(m_pendingAckNumber)
+            // Piggyback ACK if pending
             {
-	            frame.Ack = m_pendingAckNumber;
-                m_pendingAck = false;
-                if (m_ackTimerId != 0)
+                std::unique_lock<std::mutex> lock(m_ackMutex);
+                if (m_pendingAck)
                 {
-	                stopAckTimer(m_ackTimerId);
-                    m_ackTimerId = 0;
+                    frame.Ack = m_pendingAckNumber;
+                    m_pendingAck = false;
+                    if (m_ackTimerId != 0)
+                    {
+                        stopAckTimer(m_ackTimerId);
+                        m_ackTimerId = 0;
+                    }
+                }
+                else
+                {
+                    frame.Ack = 0;
                 }
             }
-            else
-            {
-	            frame.Ack = 0;
-            }
 
-            sent_frames[next_seq_num] = frame;
-            frame_timers[next_seq_num] = startTimeoutTimer(next_seq_num);
+            out_buf[next_seq] = frame;
+            frame_timers[next_seq] = startTimeoutTimer(next_seq);
 
-            if (!sendFrame(frame))
-                return;
+            sendFrame(frame);
 
-            next_seq_num = (next_seq_num + 1) % (max_seq + 1);
+            next_seq = (next_seq + 1) % (max_seq + 1);
         }
     }
 }
 
+
 void LinkLayer::receiverCallback()
 {
-    // Selective Repeat Receiver Window
     const NumberSequence window_size = m_maximumBufferedFrameCount;
     const NumberSequence max_seq = m_maximumSequence;
     NumberSequence recv_base = 0;
-    std::map<NumberSequence, Frame> buffered_frames; // sequence number -> frame
-    std::set<NumberSequence> received_seq; // for duplicate detection
 
+    std::map<NumberSequence, Frame> in_buf;
+    std::set<NumberSequence> arrived;
+
+    Logger log(std::cout);
+    
     while (m_executeReceiving)
     {
         // Handle events (ACK timeout, STOP ACK timer)
@@ -433,19 +445,17 @@ void LinkLayer::receiverCallback()
             switch (ev.Type)
             {
                 case EventType::STOP_ACK_TIMER_REQUEST:
-                {
                     stopAckTimer(ev.TimerID);
                     break;
-                }
                 case EventType::ACK_TIMEOUT:
                 {
-                        std::unique_lock<std::mutex> lock(m_ackMutex);
-                        if (m_pendingAckNumber)
-                        {
-	                        sendAck(m_pendingAckTo, m_pendingAckNumber);
-                            m_pendingAck = false;
-                            m_ackTimerId = 0;
-                        }
+                    std::unique_lock<std::mutex> lock(m_ackMutex);
+                    if (m_pendingAck)
+                    {
+                        sendAck(m_pendingAckTo, m_pendingAckNumber);
+                        m_pendingAck = false;
+                        m_ackTimerId = 0;
+                    }
                     break;
                 }
                 default:
@@ -469,47 +479,36 @@ void LinkLayer::receiverCallback()
             }
 
             NumberSequence seq = frame.NumberSeq;
-            // Check if seq is within receiver window
-            bool in_window = ((seq - recv_base + max_seq + 1) % (max_seq + 1)) < window_size;
+            bool in_window = between(seq, recv_base, (recv_base + window_size) % (max_seq + 1));
+            log << "In window: " << in_window << std::endl;
 
             if (in_window)
             {
-                // If not already received, buffer and send ACK
-                if (received_seq.find(seq) == received_seq.end())
+                // Always ACK every in-window frame, even if duplicate
                 {
-                    buffered_frames[seq] = frame;
-                    received_seq.insert(seq);
-
                     std::unique_lock<std::mutex> lock(m_ackMutex);
                     m_pendingAck = true;
                     m_pendingAckNumber = seq;
                     m_pendingAckTo = frame.Source;
-                    if (m_ackTimerId == 0)
-                    {
-	                    m_ackTimerId = startAckTimer(0, seq);
-                    }
+                    m_ackTimerId = startAckTimer(m_ackTimerId, seq);
                 }
-                else
+
+                // If not already received, buffer it
+                if (arrived.find(seq) == arrived.end())
                 {
-                    // Duplicate, re-ACK
-                    std::unique_lock<std::mutex> lock(m_ackMutex);
-                    m_pendingAck = true;
-                    m_pendingAckNumber = seq;
-                    m_pendingAckTo = frame.Source;
-                    if (m_ackTimerId == 0)
-                    {
-	                    m_ackTimerId = startAckTimer(0, seq);
-                    }
+                    in_buf[seq] = frame;
+                    arrived.insert(seq);
                 }
 
                 // Deliver in-order frames to upper layer
-                while (received_seq.find(recv_base) != received_seq.end())
+                while (arrived.find(recv_base) != arrived.end())
                 {
-                    Packet p = Buffering::unpack<Packet>(buffered_frames[recv_base].Data);
+                    Packet p = Buffering::unpack<Packet>(in_buf[recv_base].Data);
                     m_driver->getNetworkLayer().receiveData(p);
-                    buffered_frames.erase(recv_base);
-                    received_seq.erase(recv_base);
+                    in_buf.erase(recv_base);
+                    arrived.erase(recv_base);
                     recv_base = (recv_base + 1) % (max_seq + 1);
+                    log << "New receiver's lower edge: " << recv_base << std::endl;
                 }
             }
             else
@@ -518,7 +517,7 @@ void LinkLayer::receiverCallback()
                 sendNak(frame.Source, recv_base);
             }
 
-            // Piggybacked ACK
+            // Handle piggybacked ACK
             if (frame.Ack != 0)
             {
                 notifyACK(frame, frame.Ack);
@@ -526,4 +525,3 @@ void LinkLayer::receiverCallback()
         }
     }
 }
-
