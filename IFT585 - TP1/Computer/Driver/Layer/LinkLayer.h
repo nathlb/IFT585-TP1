@@ -88,6 +88,12 @@ private:
     void transmissionTimeout(size_t timerID, NumberSequence numberData);
     void ackTimeout(size_t timerID, NumberSequence numberData);
 
+    std::atomic<bool> m_pendingAck;
+    NumberSequence m_pendingAckNumber;
+    MACAddress m_pendingAckTo;
+    std::mutex m_ackMutex;
+    size_t m_ackTimerId = 0;
+
     size_t startAckTimer(size_t existingTimerID, NumberSequence ackNumber);
     void stopAckTimer(size_t timerID);
     void notifyStopAckTimers(const MACAddress& to);

@@ -384,9 +384,25 @@ void LinkLayer::senderCallback()
             frame.Destination = arp(packet);
             frame.Source = m_address;
             frame.NumberSeq = next_seq_num;
-            frame.Ack = 0;
             frame.Data = Buffering::pack<Packet>(packet);
             frame.Size = (uint16_t)frame.Data.size();
+
+            // Piggyback
+            std::unique_lock<std::mutex> lock(m_ackMutex);
+            if(m_pendingAckNumber)
+            {
+	            frame.Ack = m_pendingAckNumber;
+                m_pendingAck = false;
+                if (m_ackTimerId != 0)
+                {
+	                stopAckTimer(m_ackTimerId);
+                    m_ackTimerId = 0;
+                }
+            }
+            else
+            {
+	            frame.Ack = 0;
+            }
 
             sent_frames[next_seq_num] = frame;
             frame_timers[next_seq_num] = startTimeoutTimer(next_seq_num);
@@ -423,7 +439,13 @@ void LinkLayer::receiverCallback()
                 }
                 case EventType::ACK_TIMEOUT:
                 {
-                    sendAck(m_address, recv_base);
+                        std::unique_lock<std::mutex> lock(m_ackMutex);
+                        if (m_pendingAckNumber)
+                        {
+	                        sendAck(m_pendingAckTo, m_pendingAckNumber);
+                            m_pendingAck = false;
+                            m_ackTimerId = 0;
+                        }
                     break;
                 }
                 default:
@@ -457,12 +479,27 @@ void LinkLayer::receiverCallback()
                 {
                     buffered_frames[seq] = frame;
                     received_seq.insert(seq);
-                    sendAck(frame.Source, seq);
+
+                    std::unique_lock<std::mutex> lock(m_ackMutex);
+                    m_pendingAck = true;
+                    m_pendingAckNumber = seq;
+                    m_pendingAckTo = frame.Source;
+                    if (m_ackTimerId == 0)
+                    {
+	                    m_ackTimerId = startAckTimer(0, seq);
+                    }
                 }
                 else
                 {
                     // Duplicate, re-ACK
-                    sendAck(frame.Source, seq);
+                    std::unique_lock<std::mutex> lock(m_ackMutex);
+                    m_pendingAck = true;
+                    m_pendingAckNumber = seq;
+                    m_pendingAckTo = frame.Source;
+                    if (m_ackTimerId == 0)
+                    {
+	                    m_ackTimerId = startAckTimer(0, seq);
+                    }
                 }
 
                 // Deliver in-order frames to upper layer
