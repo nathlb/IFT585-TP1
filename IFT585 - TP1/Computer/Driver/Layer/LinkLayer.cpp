@@ -302,7 +302,6 @@ void LinkLayer::senderCallback()
 
     // Passtrough
     NumberSequence nextID = 0;
-    NumberSequence m_currentSequence = 0;
     std::map<NumberSequence, Frame> m_FramesSent;
     std::map<NumberSequence, Frame> m_EventFrameAssociation;
     while (m_executeSending)
@@ -317,7 +316,7 @@ void LinkLayer::senderCallback()
                     Frame ackFrame;
                     ackFrame.Source = m_address;
                     ackFrame.Destination = ev.Address;
-                    ackFrame.NumberSeq = 0;         
+                    ackFrame.NumberSeq = ev.Number;         
                     ackFrame.Ack = ev.Number;      
                     ackFrame.Size = FrameType::ACK; 
                     sendFrame(ackFrame);
@@ -328,7 +327,7 @@ void LinkLayer::senderCallback()
                     Frame nakFrame;
                     nakFrame.Source = m_address;
                     nakFrame.Destination = ev.Address;
-                    nakFrame.NumberSeq = 0;         
+                    nakFrame.NumberSeq = ev.Number;         
                     nakFrame.Ack = ev.Number;       
                     nakFrame.Size = FrameType::NAK;
                     sendFrame(nakFrame);
@@ -369,7 +368,7 @@ void LinkLayer::senderCallback()
             }
         }
 
-        if (m_driver->getNetworkLayer().dataReady() && m_currentSequence <= m_maximumSequence)
+        if (m_driver->getNetworkLayer().dataReady() && m_FramesSent.size() <= m_maximumSequence)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
             Frame frame;
@@ -392,43 +391,32 @@ void LinkLayer::senderCallback()
     }
 }
 
-// Fonction qui s'occupe de la reception des trames
 void LinkLayer::receiverCallback()
 {
-    // À faire TP
-    // Remplacer le code suivant qui ne fait que recevoir les trames dans l'ordre reçu sans validation
-    // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
-
-    // Passtrough
     std::set<NumberSequence> receivedSeq;
     std::map<NumberSequence, Frame> m_BufferedFrames;
     NumberSequence expected = 0;
 
     while (m_executeReceiving)
     {
-
+        // Gestion des événements
         while (!m_sendingEventQueue.empty())
         {
             Event ev = getNextSendingEvent();
             switch (ev.Type)
             {
-                case EventType::STOP_ACK_TIMER_REQUEST:
-                {
-					stopAckTimer(ev.TimerID);
-                    break;
-                }
-                case EventType::ACK_TIMEOUT:
-                {
-                    sendAck(m_address, expected);
-                    break;
-                }
-                default:
-                {
-                    break;
-                }
+            case EventType::STOP_ACK_TIMER_REQUEST:
+                stopAckTimer(ev.TimerID);
+                break;
+            case EventType::ACK_TIMEOUT:
+                sendAck(m_address, expected);
+                break;
+            default:
+                break;
             }
         }
 
+        // Réception de trames
         if (m_receivingQueue.canRead<Frame>())
         {
             Frame frame = m_receivingQueue.pop<Frame>();
@@ -443,38 +431,36 @@ void LinkLayer::receiverCallback()
                 notifyNAK(frame);
                 continue;
             }
-
-            if (frame.NumberSeq == expected)
+            else if (frame.Data.size() == 0)
             {
-                Packet p = Buffering::unpack<Packet>(frame.Data);
-                m_driver->getNetworkLayer().receiveData(p);
+                sendNak(frame.Source, frame.NumberSeq);
+                continue;
+            }
+            else if (frame.NumberSeq == expected)
+            {
+                // Livrer à la couche réseau
+                m_driver->getNetworkLayer().receiveData(Buffering::unpack<Packet>(frame.Data));
+                receivedSeq.insert(expected);
                 expected++;
 
+                // Vérifier si des trames suivantes sont déjà tamponnées
                 while (m_BufferedFrames.count(expected))
                 {
-                    Frame buffered = m_BufferedFrames[expected];
+                    Frame nextFrame = m_BufferedFrames[expected];
+                    m_driver->getNetworkLayer().receiveData(Buffering::unpack<Packet>(nextFrame.Data));
                     m_BufferedFrames.erase(expected);
-                    Packet p2 = Buffering::unpack<Packet>(buffered.Data);
-                    m_driver->getNetworkLayer().receiveData(p2);
-                    expected++;
+                    receivedSeq.insert(expected);
+                    expected = (expected + 1);
                 }
 
-                sendAck(frame.Source, expected);
+                sendAck(frame.Source, frame.NumberSeq);
             }
-            else if (expected < frame.NumberSeq && frame.NumberSeq < expected + m_maximumSequence)
+            else if (m_BufferedFrames.count(frame.NumberSeq) == 0)
             {
                 m_BufferedFrames[frame.NumberSeq] = frame;
-                sendAck(frame.Source, expected); 
+                sendAck(frame.Source, frame.NumberSeq);
             }
-            else
-            {
-                sendNak(frame.Source, expected);
-            }
-
-            if (frame.Ack != 0)
-            {
-                notifyACK(frame, frame.Ack);
-            }
+            
         }
     }
 }

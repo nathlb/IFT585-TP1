@@ -259,7 +259,9 @@ void LinkLayerLow::receiving()
             }
             else
             {
-                // Les donnees recues sont corrompues et doivent etre delaissees
+                Frame frame = Buffering::unpack<Frame>(dataBuffer.second);
+                frame.Data = 0;
+                m_driver->getLinkLayer().receiveData(frame);
                 Logger log(std::cout);
                 log << m_driver->getMACAddress() << " : Corrupted data received" << std::endl;
             }

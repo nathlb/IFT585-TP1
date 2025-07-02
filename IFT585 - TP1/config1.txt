@@ -1,4 +1,4 @@
 TransmissionHubBufferSize=500000
-TransmissionHubNoise=0
-TransmissionHubNoiseFrequency=10
-TransmissionHubNoiseByteErrorFrequency=1
+TransmissionHubNoise=1
+TransmissionHubNoiseFrequency=20
+TransmissionHubNoiseByteErrorFrequency=10
