@@ -132,54 +132,36 @@ DynamicDataBuffer CRCDataEncoderDecoder::encode(const DynamicDataBuffer& data) c
 
 std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDataBuffer& data) const
 {
-    if (data.size() < 4)
-    {
-        // Trop court pour contenir un CRC valide
-        return { false, DynamicDataBuffer() };
-    }
+    DynamicDataBuffer non_const_data = DynamicDataBuffer(data); // Créer un DynamicDataBuffer non const pour pouvoir lire les octets
+    uint8_t* dataReceived = new uint8_t[data.size()]; // Allouer un tableau de taille data.size() pour les données reçues
 
-    size_t dataSize = data.size() - 4;
+    non_const_data.readTo(dataReceived, 0, data.size()); // Copier les octets de data dans dataReceived
+    DynamicDataBuffer dataWithoutCRCBuffer = DynamicDataBuffer(data.size() - 4, dataReceived); // Créer un DynamicDataBuffer avec les données reçues sans le CRC
 
-    // Extraire les données utiles
-    uint8_t* dataBytes = new uint8_t[dataSize];
-    for (size_t i = 0; i < dataSize; ++i)
-    {
-        dataBytes[i] = data[i];
-    }
+    uint32_t computedCRC = compute_crc32(dataReceived, data.size()); // Calculer le CRC sur les données
+    bool isValid = (computedCRC == 0); // Vérifier si les données sont valides (CRC doit être 0)
+    delete[] dataReceived; // Libérer la mémoire allouée pour dataReceived
 
-    // Extraire le CRC reçu (les 4 derniers octets)
-    uint32_t receivedCRC =
-        (static_cast<uint32_t>(data[dataSize]) << 24) |
-        (static_cast<uint32_t>(data[dataSize + 1]) << 16) |
-        (static_cast<uint32_t>(data[dataSize + 2]) << 8) |
-        (static_cast<uint32_t>(data[dataSize + 3]));
-
-    // Calculer le CRC sur les données extraites
-    uint32_t computedCRC = compute_crc32(dataBytes, dataSize);
-
-    bool isValid = (computedCRC == receivedCRC);
-
-    // Créer un DynamicDataBuffer sans le CRC
-    DynamicDataBuffer dataWithoutCRCBuffer(dataSize, dataBytes);
-
-    delete[] dataBytes;
-
-    // Logs
     Logger logger(std::cout);
-    logger << "Decodage : Taille des donnees = " << data.size() << ", CRC calcule = "
-        << std::hex << std::setfill('0') << std::setw(8) << computedCRC
-        << ", CRC recu = " << std::setw(8) << receivedCRC << std::dec << std::endl;
-
-    logger << (isValid ? "Donnees valides." : "Donnees corrompues.") << std::endl;
-
+    logger << "Decodage : Taille des donnees = " << data.size() << ", CRC = "
+        << std::hex << std::setfill('0') << std::setw(8) << computedCRC << std::dec << std::endl;
+    if (isValid)
+    {
+        logger << "Donnees valides." << std::endl;
+    }
+    else
+    {
+        logger << "Donnees corrompues." << std::endl;
+    }
     logger << "Donnees sans CRC: ";
     for (size_t i = 0; i < dataWithoutCRCBuffer.size(); ++i)
     {
         logger << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(dataWithoutCRCBuffer[i]) << " ";
     }
-    logger << std::endl << std::endl;
+    logger << std::endl << std::endl; // Double saut de ligne pour la lisibilité
 
-    return { isValid, dataWithoutCRCBuffer };
+
+    return std::pair<bool, DynamicDataBuffer>(isValid, dataWithoutCRCBuffer);
 }
 
 
@@ -278,9 +260,8 @@ void LinkLayerLow::receiving()
             else
             {
                 // Les donnees recues sont corrompues et doivent etre delaissees
-                Frame frame = Buffering::unpack<Frame>(dataBuffer.second);
-                frame.Data = 0;
-                m_driver->getLinkLayer().receiveData(frame);
+                Logger log(std::cout);
+                log << m_driver->getMACAddress() << " : Corrupted data received" << std::endl;
             }
         }
     }

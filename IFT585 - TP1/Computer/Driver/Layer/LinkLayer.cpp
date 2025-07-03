@@ -366,6 +366,8 @@ void LinkLayer::senderCallback()
                 } 
             }
         }
+        //SE QUE JE VEUX PK CA MARCHE PAS CALISS DESTI DE TBNK
+        //if (m_driver->getNetworkLayer().dataReady() && (m_FramesSent.empty() || (m_FramesSent.rbegin()->first - m_FramesSent.begin()->first) <= m_maximumSequence))
         if (m_driver->getNetworkLayer().dataReady() && m_FramesSent.size() <= m_maximumSequence)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
