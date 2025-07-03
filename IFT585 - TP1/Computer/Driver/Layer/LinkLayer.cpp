@@ -1,4 +1,4 @@
-#include "LinkLayer.h"
+ï»¿#include "LinkLayer.h"
 #include "../NetworkDriver.h"
 
 #include "../../../General/Configuration.h"
@@ -101,7 +101,7 @@ bool LinkLayer::sendFrame(const Frame& frame)
     {
         if (canSendData(frame))
         {
-            // Vous pouvez décommenter ce code pour avoir plus de détails dans la console lors de l'exécution
+            // Vous pouvez dÃ©commenter ce code pour avoir plus de dÃ©tails dans la console lors de l'exÃ©cution
             Logger log(std::cout);
             if (frame.Size == FrameType::NAK)
             {
@@ -277,7 +277,7 @@ void LinkLayer::receiveData(Frame data)
     // Si la couche est pleine, la trame est perdue. Elle devra etre envoye a nouveau par l'emetteur
     if (canReceiveDataFromPhysicalLayer(data))
     {
-        // Est-ce que la trame reçue est pour nous?
+        // Est-ce que la trame reÃ§ue est pour nous?
         if (data.Destination == m_address || data.Destination.isMulticast())
         {
             m_receivingQueue.push(data);
@@ -296,16 +296,15 @@ MACAddress LinkLayer::arp(const Packet& packet) const
 // Fonction qui fait l'envoi des trames et qui gere la fenetre d'envoi
 void LinkLayer::senderCallback()
 {
-    // À faire TP
-    // Remplacer le code suivant qui ne fait qu'envoyer les trames dans l'ordre reçu sans validation
-    // afin d'exécuter le protocole à fenêtre demandé dans l'énoncé.
+    // Ã€ faire TP
+    // Remplacer le code suivant qui ne fait qu'envoyer les trames dans l'ordre reÃ§u sans validation
+    // afin d'exÃ©cuter le protocole Ã  fenÃªtre demandÃ© dans l'Ã©noncÃ©.
 
     // Passtrough
-    NumberSequence nextID = 0;
-    std::map<NumberSequence, Frame> m_FramesSent;
-    std::map<NumberSequence, Frame> m_EventFrameAssociation;
+    int minID = 0;
     while (m_executeSending)
     {
+        std::lock_guard<std::mutex> lock(m_eventQueueMutex);
         while (!m_sendingEventQueue.empty())
         {
             Event ev = getNextSendingEvent();
@@ -367,6 +366,7 @@ void LinkLayer::senderCallback()
                 } 
             }
         }
+        //m_FramesSent.begin()->first;
 
         if (m_driver->getNetworkLayer().dataReady() && m_FramesSent.size() <= m_maximumSequence)
         {
@@ -374,19 +374,18 @@ void LinkLayer::senderCallback()
             Frame frame;
             frame.Destination = arp(packet);
             frame.Source = m_address;
-            frame.NumberSeq = nextID;
+            frame.NumberSeq = m_nextID;
             frame.Ack = 0;
             frame.Data = Buffering::pack<Packet>(packet);
             frame.Size = (uint16_t)frame.Data.size();
-            m_FramesSent[nextID] = frame;
-            m_EventFrameAssociation[startTimeoutTimer(nextID)] = frame;
+            m_FramesSent[m_nextID] = frame;
+            m_EventFrameAssociation[startTimeoutTimer(m_nextID)] = frame;
             
 
             if (!sendFrame(frame))
                 return;
 
-            nextID++;
-
+            m_nextID++;
         }
     }
 }
@@ -399,24 +398,25 @@ void LinkLayer::receiverCallback()
 
     while (m_executeReceiving)
     {
-        // Gestion des événements
-        while (!m_sendingEventQueue.empty())
         {
-            Event ev = getNextSendingEvent();
-            switch (ev.Type)
+            std::lock_guard<std::mutex> lock(m_eventQueueMutex);
+            while (!m_sendingEventQueue.empty())
             {
-            case EventType::STOP_ACK_TIMER_REQUEST:
-                stopAckTimer(ev.TimerID);
-                break;
-            case EventType::ACK_TIMEOUT:
-                sendAck(m_address, expected);
-                break;
-            default:
-                break;
+                Event ev = getNextSendingEvent();
+                switch (ev.Type)
+                {
+                case EventType::STOP_ACK_TIMER_REQUEST:
+                    stopAckTimer(ev.TimerID);
+                    break;
+                case EventType::ACK_TIMEOUT:
+                    sendAck(m_address, expected);
+                    break;
+                default:
+                    break;
+                }
             }
         }
 
-        // Réception de trames
         if (m_receivingQueue.canRead<Frame>())
         {
             Frame frame = m_receivingQueue.pop<Frame>();
@@ -424,43 +424,38 @@ void LinkLayer::receiverCallback()
             if (frame.Size == FrameType::ACK)
             {
                 notifyACK(frame, frame.Ack);
-                continue;
             }
             else if (frame.Size == FrameType::NAK)
             {
                 notifyNAK(frame);
-                continue;
             }
             else if (frame.Data.size() == 0)
             {
                 sendNak(frame.Source, frame.NumberSeq);
-                continue;
             }
             else if (frame.NumberSeq == expected)
             {
-                // Livrer à la couche réseau
                 m_driver->getNetworkLayer().receiveData(Buffering::unpack<Packet>(frame.Data));
                 receivedSeq.insert(expected);
                 expected++;
+                sendAck(frame.Source, frame.NumberSeq);
 
-                // Vérifier si des trames suivantes sont déjà tamponnées
+                // Traite les trames dÃ©jÃ  reÃ§ues en avance
                 while (m_BufferedFrames.count(expected))
                 {
                     Frame nextFrame = m_BufferedFrames[expected];
                     m_driver->getNetworkLayer().receiveData(Buffering::unpack<Packet>(nextFrame.Data));
                     m_BufferedFrames.erase(expected);
                     receivedSeq.insert(expected);
-                    expected = (expected + 1);
+                    expected++;
                 }
-
-                sendAck(frame.Source, frame.NumberSeq);
             }
             else if (m_BufferedFrames.count(frame.NumberSeq) == 0)
             {
                 m_BufferedFrames[frame.NumberSeq] = frame;
                 sendAck(frame.Source, frame.NumberSeq);
             }
-            
         }
     }
 }
+

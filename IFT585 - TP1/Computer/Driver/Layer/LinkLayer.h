@@ -1,4 +1,4 @@
-#ifndef _COMPUTER_DRIVER_LAYER_LINK_LAYER_H_
+﻿#ifndef _COMPUTER_DRIVER_LAYER_LINK_LAYER_H_
 #define _COMPUTER_DRIVER_LAYER_LINK_LAYER_H_
 
 #include "DataType.h"
@@ -11,6 +11,8 @@
 #include <chrono>
 #include <cstdint>
 #include <queue>
+#include <map>
+#include <set>
 #include <mutex>
 #include <thread>
 
@@ -22,14 +24,14 @@ class LinkLayer
 private:
     enum class EventType
     {
-        INVALID, // Un evenement invalide
-        ACK_TIMEOUT, // On doit envoyer un ack, parce qu'on n'a pas fait de piggybacking
-        SEND_TIMEOUT, // On n'a pas recu de reponse du receveur, on doit reenvoyer la trame
-        ACK_RECEIVED, // On a recu un ACK
-        NAK_RECEIVED, // On a recu un NAK
-        SEND_ACK_REQUEST, // On doit envoyer ce ACK
-        SEND_NAK_REQUEST, // On doit envoyer ce NAK
-        STOP_ACK_TIMER_REQUEST, // On veut arreter les timers de ACK pour une adresse particuliere
+        INVALID,
+        ACK_TIMEOUT,
+        SEND_TIMEOUT,
+        ACK_RECEIVED,
+        NAK_RECEIVED,
+        SEND_ACK_REQUEST,
+        SEND_NAK_REQUEST,
+        STOP_ACK_TIMER_REQUEST,
     };
 
     struct Event
@@ -53,9 +55,10 @@ private:
 
     NumberSequence m_maximumSequence;
     NumberSequence m_maximumBufferedFrameCount;
-    
+
     std::chrono::milliseconds m_transmissionTimeout;
     std::chrono::milliseconds m_ackTimeout;
+
     std::queue<Event> m_receivingEventQueue;
     std::queue<Event> m_sendingEventQueue;
 
@@ -65,12 +68,20 @@ private:
     std::atomic<bool> m_executeReceiving;
     std::atomic<bool> m_executeSending;
 
-    std::mutex m_mutex;
+    std::mutex m_mutex;                 
     std::mutex m_receiveEventMutex;
     std::mutex m_sendEventMutex;
 
+    std::mutex m_eventQueueMutex;        
+    std::mutex m_framesSentMutex;        
+    std::mutex m_timerAssociationMutex;  
+
     std::thread m_senderThread;
     std::thread m_receiverThread;
+
+    std::map<NumberSequence, Frame> m_FramesSent;
+    std::map<size_t, Frame> m_EventFrameAssociation;
+    NumberSequence m_nextID = 0;
 
     void receiverCallback();
     void senderCallback();
@@ -97,7 +108,7 @@ private:
     Event getNextSendingEvent();
     Event getNextReceivingEvent();
 
-    MACAddress arp(const Packet& p) const; // Retourne la MACAddress de destination du packet
+    MACAddress arp(const Packet& p) const;
     bool canReceiveDataFromPhysicalLayer(const Frame& data) const;
 
 public:
@@ -114,7 +125,6 @@ public:
 
     bool dataReceived() const;
     void receiveData(Frame data);
-
 };
 
 #endif //_COMPUTER_DRIVER_LAYER_LINK_LAYER_H_
