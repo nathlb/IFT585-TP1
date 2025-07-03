@@ -105,15 +105,15 @@ bool LinkLayer::sendFrame(const Frame& frame)
             Logger log(std::cout);
             if (frame.Size == FrameType::NAK)
             {
-                log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+                log << frame.Source << " : Sending NAK  to " << frame.Destination << " : " << frame.Ack /*% m_maximumSequence + 1*/ << std::endl ;
             }
             else if (frame.Size == FrameType::ACK)
             {
-                log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack << std::endl;
+                log << frame.Source << " : Sending ACK  to " << frame.Destination << " : " << frame.Ack /*% m_maximumSequence + 1*/ << std::endl ;
             }
             else
             {
-                log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq << std::endl;
+                log << frame.Source << " : Sending DATA to " << frame.Destination << " : " << frame.NumberSeq /* % m_maximumSequence + 1*/ << std::endl ;
             }
             m_sendingQueue.push(frame);
             return true;
@@ -366,8 +366,6 @@ void LinkLayer::senderCallback()
                 } 
             }
         }
-        //m_FramesSent.begin()->first;
-
         if (m_driver->getNetworkLayer().dataReady() && m_FramesSent.size() <= m_maximumSequence)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
@@ -384,7 +382,7 @@ void LinkLayer::senderCallback()
 
             if (!sendFrame(frame))
                 return;
-
+          
             m_nextID++;
         }
     }

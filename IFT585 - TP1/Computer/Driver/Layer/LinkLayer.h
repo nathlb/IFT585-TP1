@@ -50,6 +50,7 @@ private:
 
     NetworkDriver* m_driver;
     std::unique_ptr<Timer> m_timers;
+    std::mutex m_frameMapMutex;
 
     MACAddress m_address;
 
@@ -82,6 +83,7 @@ private:
     std::map<NumberSequence, Frame> m_FramesSent;
     std::map<size_t, Frame> m_EventFrameAssociation;
     NumberSequence m_nextID = 0;
+    std::mutex m_idMutex;
 
     void receiverCallback();
     void senderCallback();
