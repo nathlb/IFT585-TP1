@@ -22,6 +22,8 @@ class NetworkDriver;
 class LinkLayer
 {
 private:
+
+ 
     enum class EventType
     {
         INVALID,
@@ -82,6 +84,7 @@ private:
 
     std::map<NumberSequence, Frame> m_FramesSent;
     std::map<size_t, Frame> m_EventFrameAssociation;
+    NumberSequence m_sendBase = 0; 
     NumberSequence m_nextID = 0;
     std::mutex m_idMutex;
 
@@ -112,6 +115,8 @@ private:
 
     MACAddress arp(const Packet& p) const;
     bool canReceiveDataFromPhysicalLayer(const Frame& data) const;
+    bool isSendEventQueueEmpty() ;
+    bool isReceiveEventQueueEmpty() ;
 
 public:
     LinkLayer(NetworkDriver* driver, const Configuration& config);

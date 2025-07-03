@@ -293,6 +293,17 @@ MACAddress LinkLayer::arp(const Packet& packet) const
     return packet.Destination;
 }
 
+bool LinkLayer::isSendEventQueueEmpty()
+{
+    std::lock_guard<std::mutex> lock(m_sendEventMutex);
+    return m_sendingEventQueue.empty();
+}
+bool LinkLayer::isReceiveEventQueueEmpty()
+{
+    std::lock_guard<std::mutex> lock(m_receiveEventMutex);
+    return m_receivingEventQueue.empty();
+}
+
 // Fonction qui fait l'envoi des trames et qui gere la fenetre d'envoi
 void LinkLayer::senderCallback()
 {
@@ -304,8 +315,7 @@ void LinkLayer::senderCallback()
     int minID = 0;
     while (m_executeSending)
     {
-        std::lock_guard<std::mutex> lock(m_eventQueueMutex);
-        while (!m_sendingEventQueue.empty())
+        while (!isSendEventQueueEmpty())
         {
             Event ev = getNextSendingEvent();
             switch (ev.Type)
@@ -334,28 +344,50 @@ void LinkLayer::senderCallback()
                 }
                 case EventType::NAK_RECEIVED:
                 {
-                    if (m_FramesSent.find(ev.Number) != m_FramesSent.end())
+                    if (m_FramesSent.count(ev.Number) > 0)
                     {
-                        Frame frame = m_FramesSent[ev.Number];
+                        Frame& frame = m_FramesSent[ev.Number];
+                        if (!sendFrame(frame))
+                            return;
                         m_EventFrameAssociation[startTimeoutTimer(ev.Number)] = frame;
-                        sendFrame(frame);
                     }
                     break;
                 }
 				case EventType::ACK_RECEIVED:
 				{
-                    m_FramesSent.erase(ev.Number);
-					m_EventFrameAssociation.erase(ev.Number);
+                    if (between(ev.Number, m_sendBase, m_nextID))
+                    {
+                        // Slide the window
+                        NumberSequence oldBase = m_sendBase;
+                        m_sendBase = (ev.Number + 1) % (m_maximumSequence + 1);
+                        for (NumberSequence i = oldBase; i != m_sendBase; i = (i + 1) % (m_maximumSequence + 1))
+                        {
+                            m_FramesSent.erase(i);
+                            m_EventFrameAssociation.erase(i);
+                        }
+                    }
+                    break;
+                }
+                case EventType::STOP_ACK_TIMER_REQUEST:
+                {
+                    // On stoppe le timer d'ACK pour l'adresse specifiee
+                    stopAckTimer(ev.TimerID);
+                    // On envoie un ACK piggyback si on a un ACK a envoyer
+                    if (ev.Next != 0)
+                    {
+                        sendAck(ev.Address, ev.Next);
+                        notifyStopAckTimers(ev.Address);
+                    }
                     break;
 				}
                 case EventType::SEND_TIMEOUT:
                 {
-                    if (m_FramesSent.find(ev.Number) != m_FramesSent.end())
+                    if (m_FramesSent.count(ev.Number) > 0)
                     {
-                        Frame frame = m_FramesSent[ev.Number];
-                        m_EventFrameAssociation[startTimeoutTimer(ev.Number)] = frame;
+                        Frame& frame = m_FramesSent[ev.Number];
                         if (!sendFrame(frame))
                             return;
+                        m_EventFrameAssociation[startTimeoutTimer(ev.Number)] = frame;
                     }
                     break;
                 }
@@ -368,7 +400,7 @@ void LinkLayer::senderCallback()
         }
         //SE QUE JE VEUX PK CA MARCHE PAS CALISS DESTI DE TBNK
         //if (m_driver->getNetworkLayer().dataReady() && (m_FramesSent.empty() || (m_FramesSent.rbegin()->first - m_FramesSent.begin()->first) <= m_maximumSequence))
-        if (m_driver->getNetworkLayer().dataReady() && m_FramesSent.size() <= m_maximumSequence)
+       if (m_driver->getNetworkLayer().dataReady() && (m_nextID - m_sendBase + m_maximumSequence + 1) % (m_maximumSequence + 1) < m_maximumBufferedFrameCount)
         {
             Packet packet = m_driver->getNetworkLayer().getNextData();
             Frame frame;
@@ -400,7 +432,7 @@ void LinkLayer::receiverCallback()
     {
         {
             std::lock_guard<std::mutex> lock(m_eventQueueMutex);
-            while (!m_sendingEventQueue.empty())
+            while (!isReceiveEventQueueEmpty())
             {
                 Event ev = getNextSendingEvent();
                 switch (ev.Type)
@@ -417,7 +449,7 @@ void LinkLayer::receiverCallback()
             }
         }
 
-        if (m_receivingQueue.canRead<Frame>())
+        if (dataReceived())
         {
             Frame frame = m_receivingQueue.pop<Frame>();
 

@@ -1,0 +1,3 @@
+/home/xama/repos/IFT585-TP1/IFT585 - TP1/CMakeFiles/Simulateur.dir
+/home/xama/repos/IFT585-TP1/IFT585 - TP1/CMakeFiles/edit_cache.dir
+/home/xama/repos/IFT585-TP1/IFT585 - TP1/CMakeFiles/rebuild_cache.dir
