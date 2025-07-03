@@ -117,26 +117,26 @@ DynamicDataBuffer CRCDataEncoderDecoder::encode(const DynamicDataBuffer& data) c
 	DynamicDataBuffer dataWithCRCBuffer(data.size() + 4, dataWithCRC); // Créer un DynamicDataBuffer avec les données et le CRC
 	delete[] dataWithCRC; // Libérer la mémoire allouée pour dataWithCRC
 
-	Logger logger(std::cout);
-	logger << "Encodage : Taille des donnees = " << data.size() << ", CRC = "
-		<< std::hex << std::setfill('0') << std::setw(8) << crc << std::dec << std::endl;
-    logger << "Donnees avec CRC: ";
-	for (size_t i = 0; i < dataWithCRCBuffer.size(); ++i)
-	{
-		logger << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(dataWithCRCBuffer[i]) << " ";
-	}
-	logger << std::endl << std::endl; // Double saut de ligne pour la lisibilité
+	//Logger logger(std::cout);
+	//logger << "Encodage : Taille des donnees = " << data.size() << ", CRC = "
+	//	<< std::hex << std::setfill('0') << std::setw(8) << crc << std::dec << std::endl;
+ //   logger << "Donnees avec CRC: ";
+	//for (size_t i = 0; i < dataWithCRCBuffer.size(); ++i)
+	//{
+	//	logger << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(dataWithCRCBuffer[i]) << " ";
+	//}
+	//logger << std::endl << std::endl; // Double saut de ligne pour la lisibilité
 
     return dataWithCRCBuffer;
 }
 
 std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDataBuffer& data) const
 {
-	Logger logger(std::cout);
+	//Logger logger(std::cout);
 
     if (data.size() < 4)
     {
-		logger << "Decodage : Donnees trop courtes pour contenir un CRC." << std::endl;
+		//logger << "Decodage : Donnees trop courtes pour contenir un CRC." << std::endl;
 		return std::pair<bool, DynamicDataBuffer>(false, DynamicDataBuffer());
     }
 	DynamicDataBuffer non_const_data = DynamicDataBuffer(data); // Créer un DynamicDataBuffer non const pour pouvoir lire les octets
@@ -149,22 +149,22 @@ std::pair<bool, DynamicDataBuffer> CRCDataEncoderDecoder::decode(const DynamicDa
 	bool isValid = (computedCRC == 0); // Vérifier si les données sont valides (CRC doit être 0)
 	delete[] dataReceived; // Libérer la mémoire allouée pour dataReceived
 
-	logger << "Decodage : Taille des donnees = " << data.size() << ", CRC = "
-		<< std::hex << std::setfill('0') << std::setw(8) << computedCRC << std::dec << std::endl;
-	if (isValid)
-	{
-		logger << "Donnees valides." << std::endl;
-	}
-	else
-	{
-		logger << "Donnees corrompues." << std::endl;
-	}
-    logger << "Donnees sans CRC: ";
-	for (size_t i = 0; i < dataWithoutCRCBuffer.size(); ++i)
-	{
-		logger << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(dataWithoutCRCBuffer[i]) << " ";
-	}
-	logger << std::endl << std::endl; // Double saut de ligne pour la lisibilité
+	//logger << "Decodage : Taille des donnees = " << data.size() << ", CRC = "
+	//	<< std::hex << std::setfill('0') << std::setw(8) << computedCRC << std::dec << std::endl;
+	//if (isValid)
+	//{
+	//	logger << "Donnees valides." << std::endl;
+	//}
+	//else
+	//{
+	//	logger << "Donnees corrompues." << std::endl;
+	//}
+ //   logger << "Donnees sans CRC: ";
+	//for (size_t i = 0; i < dataWithoutCRCBuffer.size(); ++i)
+	//{
+	//	logger << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(dataWithoutCRCBuffer[i]) << " ";
+	//}
+	//logger << std::endl << std::endl; // Double saut de ligne pour la lisibilité
 
 
     return std::pair<bool, DynamicDataBuffer>(isValid, dataWithoutCRCBuffer);

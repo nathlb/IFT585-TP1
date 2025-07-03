@@ -118,12 +118,26 @@
     <Natvis Include="IFT585.natvis" />
   </ItemGroup>
   <ItemGroup>
-    <Text Include="globalConfig.txt" />
     <Text Include="Computer1.txt" />
+    <Text Include="Computer1Files.txt" />
     <Text Include="Computer2.txt" />
     <Text Include="Computer2Files.txt" />
-    <Text Include="Computer1Files.txt" />
-    <Text Include="yo.txt" />
-    <Text Include="hey.txt" />
+    <Text Include="Computer3.txt" />
+    <Text Include="Computer3Files.txt" />
+    <Text Include="Computer4.txt" />
+    <Text Include="Computer4Files.txt" />
+    <Text Include="Computer5.txt" />
+    <Text Include="Computer5Files.txt" />
+    <Text Include="Computer6.txt" />
+    <Text Include="Computer6Files.txt" />
+    <Text Include="config1.txt" />
+    <Text Include="config2.txt" />
+    <Text Include="test2.txt" />
+    <Text Include="test3.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="test1.jpg">
+      <Filter>Fichiers de ressources</Filter>
+    </Image>
   </ItemGroup>
 </Project>

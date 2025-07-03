@@ -46,6 +46,8 @@ private:
         }
     };
 
+	static constexpr NumberSequence NO_ACK = static_cast<NumberSequence>(-1);
+
     NetworkDriver* m_driver;
     std::unique_ptr<Timer> m_timers;
 
@@ -88,9 +90,7 @@ private:
     void transmissionTimeout(size_t timerID, NumberSequence numberData);
     void ackTimeout(size_t timerID, NumberSequence numberData);
 
-    std::atomic<bool> m_pendingAck;
-    NumberSequence m_pendingAckNumber;
-    MACAddress m_pendingAckTo;
+    std::queue<std::pair<MACAddress, NumberSequence>> m_pendingAck;
     std::mutex m_ackMutex;
     size_t m_ackTimerId = 0;
 
